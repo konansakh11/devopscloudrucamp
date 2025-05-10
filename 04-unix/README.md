@@ -1,1 +1,2 @@
-echo "" > /etc/resolv.conf
+Команда блокировки выхода в сеть интернет:
+- echo "" > /etc/resolv.conf
