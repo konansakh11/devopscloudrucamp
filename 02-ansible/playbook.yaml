@@ -1,0 +1,77 @@
+- name: Установка пакета docker-ce, запуск контейнеров в 3-х экземплярах, настройка балансировщика на nginx
+  hosts: webservers
+  become: yes
+  tasks:
+    - name: Установка пакета docker-ce
+      apt:
+        name: docker-ce
+        state: present
+
+    - name: Запуск сервиса docker
+      service:
+        name: docker
+        state: started
+
+    - name: Копирование credentials для доступа в docker hub
+      copy:
+        src: ~/.docker/config.json
+        dest: ~/.docker/config.json
+
+    - name: Получение образа из приватного репозитория
+      community.docker.docker_image:
+        name: docker.io/konansakh11/01-application
+        tag: 1.0.0
+        source: pull
+
+    - name: Запуск docker-контейнеров с web-приложением в 3-х экземплярах
+      community.docker.docker_container:
+        name: 01-application-{{ item }}
+        image: konansakh11/01-application:1.0.0
+        state: started
+        ports:
+          - 800{{ item }}:8000
+      with_items:
+      - "1"
+      - "2"
+      - "3"
+
+    - name: Получение ip-адресов контейнеров
+      shell: docker inspect 01-application-{{ item }} | grep '"IPAddress"' | head -n 1 | cut -d'"' -f4
+      register: echo
+      with_items:
+        - "1"
+        - "2"
+        - "3"
+
+    - name: Сохранение ip-адресов в список
+      set_fact:
+        server_ips: "{{ echo.results | map(attribute='stdout') | list }}"
+
+    - name: Установка nginx
+      apt:
+        name: nginx
+        state: present
+
+    - name: Запуск nginx
+      service:
+        name: nginx
+        state: started
+
+    - name: Вставка блока балансировщика с ip-адресами в конфигурацию nginx
+      blockinfile:
+        path: /etc/nginx/sites-available/default
+        block: |
+            upstream app{
+                {% for ip in server_ips %}
+                server {{ ip }}:8000;
+                {% endfor %}
+             }
+
+            server {
+                listen 80;
+
+                location / {
+                    proxy_pass http://app;
+                }
+             }
+      loop: "{{ echo.results }}"
